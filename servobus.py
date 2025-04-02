@@ -1,6 +1,6 @@
 import serial
-import pigpio
-import time as Time
+import RPi.GPIO as GPIO
+from time import sleep
 import warnings
 
 SERVO_MOVE_TIME_WRITE               =       1
@@ -58,24 +58,26 @@ class ServoSerial:
         self.tx_ena                 =       gpio_tx_ena
         self.rx_ena                 =       gpio_rx_ena
         self.Serial                 =       serial.Serial(port=self.port, baudrate=115200, timeout= 1)  # open serial port
-        self.rpi                    =       pigpio.pi() # Connect to local Pi.
-        # set gpio modes
-        self.rpi.set_mode(gpio_tx_ena, pigpio.OUTPUT)
-        self.rpi.set_mode(gpio_rx_ena, pigpio.OUTPUT)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        GPIO.setup(self.tx_ena,GPIO.OUT)
+        GPIO.setup(self.rx_ena,GPIO.OUT)
+        GPIO.output(self.tx_ena, GPIO.HIGH)
+        GPIO.output(self.rx_ena, GPIO.HIGH)
 
-        self.rpi.write(self.tx_ena,SERVO_GPIO_OUT_LOW)
-        self.rpi.write(self.rx_ena,SERVO_GPIO_OUT_LOW)
 
     def transmit_data(self, data):
         # start to send
         if self.Serial.is_open == False:
             self.Serial.open()
         if self.Serial.is_open == True:
-            self.rpi.write(self.tx_ena,SERVO_GPIO_OUT_HIGH)
-            self.rpi.write(self.rx_ena,SERVO_GPIO_OUT_LOW)
+            # print("Transmitted data(RAW): ",bytearray(data))
+            print("Transmitted data(DEC): ",data)
             num = self.Serial.write(bytearray(data))
-            Time.sleep(0.005)
-            self.Serial.close()
+            self.Serial.flush()
+            # eliminated the echo
+            self.Serial.read(num)
+            sleep(0.08)
             # check that data sent completely
             if num == len(data):
                 print("Servo data has been transmited successfully.\n")
@@ -87,11 +89,12 @@ class ServoSerial:
             print("The port has not open yet, please make sure the port is ready to use\n")
             return SERVO_PACKET_SEND_ERROR
     
-    def receive_data(self, len, cmd):
-        rx = self.Serial.read(len)
-        self.rpi.write(self.tx_ena,SERVO_GPIO_OUT_LOW)
-        self.rpi.write(self.rx_ena,SERVO_GPIO_OUT_HIGH)
-        if self.rx_check(rx, len, cmd) == SERVO_PACKET_OK:
+    def receive_data(self, read_len, cmd):
+        rx = self.Serial.read(read_len)
+        sleep(0.01)
+        # print("Received data(RAW): ",rx)
+        print("Received data(DEC): ",list(rx))
+        if self.rx_check(rx, read_len, cmd) == SERVO_PACKET_OK:
             return rx
         else:
             return []
@@ -201,10 +204,10 @@ class ServoSerial:
         # start to send
         num = self.transmit_data(packet)
         if num == SERVO_PACKET_OK:
-            rx = self.receive_data(SERVO_PACKET_LEN_7 + 3, SERVO_MOVE_TIME_READ)
+            rx = self.receive_data(SERVO_PACKET_LEN_7+3, SERVO_MOVE_TIME_READ)
                     
         if len(rx) == SERVO_PACKET_LEN_7 + 3:
-            move = int(round((rx[5] + (rx[6] << 8)) * 240 / 1000))
+            move = int(round((rx[5] + (rx[6] << 8)) * 0.24))
             time = int(round((rx[7] + (rx[8] << 8))))
             print("The servo has moved to : " + str(move) + " degree within time : " + str(time) + " ms.\n")
             return move, time
@@ -276,7 +279,7 @@ class ServoSerial:
         # start to send
         num = self.transmit_data(packet)
         if num == SERVO_PACKET_OK:
-            rx = self.receive_data(SERVO_PACKET_LEN_7 + 3, SERVO_MOVE_TIME_WAIT_READ)
+            rx = self.receive_data(SERVO_PACKET_LEN_7+3, SERVO_MOVE_TIME_WAIT_READ)
 
         if len(rx) == SERVO_PACKET_LEN_7 + 3:
             move = rx[5] + rx[6] * 256
@@ -646,8 +649,8 @@ class ServoSerial:
         if num == SERVO_PACKET_OK:
             rx = self.receive_data(SERVO_PACKET_LEN_5 + 3, SERVO_POS_READ)
         if len(rx) == SERVO_PACKET_LEN_5 + 3:
-            print("The current position is " + str(rx[5] + (rx[6] << 8) * 240/1000) + ".\n")
-            return rx[5] + (rx[6] << 8) * 240/1000
+            print("The current position is " + str((rx[5] + (rx[6] << 8)) * 0.24) + ".\n")
+            return (rx[5] + (rx[6] << 8)) * 0.24
         else:
             print("An error was occured.\n")
             return -1
@@ -745,7 +748,7 @@ class ServoSerial:
         # start to send
         num = self.transmit_data(packet)
         if num == SERVO_PACKET_OK:
-            rx = self.receive_data(SERVO_PACKET_LEN_4 + 3, SERVO_LOAD_OR_UNLOAD_READ)
+            rx = self.receive_data(SERVO_PACKET_LEN_3 + 3, SERVO_LOAD_OR_UNLOAD_READ)
 
         if len(rx) == SERVO_PACKET_LEN_4 + 3:
             return rx[5]
@@ -841,7 +844,7 @@ class ServoSerial:
         num = self.transmit_data(packet)
         if num == SERVO_PACKET_OK:
             rx = self.receive_data(SERVO_PACKET_LEN_4 + 3, SERVO_LED_ERROR_READ)
-        if len(rx) > SERVO_PACKET_LEN_4 + 3:
+        if len(rx) == SERVO_PACKET_LEN_4 + 3:
             return rx[5]
         else:
             print("An error was occured.\n")
